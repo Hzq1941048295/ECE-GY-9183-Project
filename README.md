@@ -5,6 +5,12 @@
 Discuss: Value proposition: Your will propose a machine learning system that can be used in an existing business or service. (You should not propose a system in which a new business or service would be developed around the machine learning system.) Describe the value proposition for the machine learning system. What’s the (non-ML) status quo used in the business or service? What business metric are you going to be judged on? (Note that the “service” does not have to be for general users; you can propose a system for a science problem, for example.)
 -->
 
+
+
+
+
+
+
 ### Contributors
 
 <!-- Table of contributors and their roles. First row: define responsibilities that are shared by the team. Then each row after that is: name of contributor, their role, and in the third column you will link to their contributions. If your project involves multiple repos, you will link to their contributions in all repos here. -->
@@ -52,6 +58,94 @@ Discuss: Value proposition: Your will propose a machine learning system that can
 #### Model training and training platforms
 
 <!-- Make sure to clarify how you will satisfy the Unit 4 and Unit 5 requirements, and which optional "difficulty" points you are attempting. -->
+
+
+I. Training Pipeline Architecture
+
+II. Core Implementation
+  2.1 Model Selection & Training Strategy
+
+    base model:
+
+      python"
+        model = AutoModelForCausalLM.from_pretrained(
+            "codellama/CodeLlama-7b-hf",  # Optimized for code understanding
+            trust_remote_code=True,
+            attn_implementation="flash_attention_2"  # Memory optimization
+        )"
+
+    Retraining Protocol:
+      Trigger Conditions:
+      Parameter-Efficient Fine-tuning:
+  
+  2.2 Distributed Training Configuration
+    Hardware Matrix:
+Stage	GPU Type	Count	Memory Optimizations
+Pretraining	A100-80G	8	FSDP + Activation Checkpoint
+Fine-tuning	A10G	4	DDP + Gradient Accumulation
+Evaluation	T4	1	FP16 Quantization
+    Performance Validation:
+
+
+
+III. Training Infrastructure
+  3.1 MLFlow Experiment Tracking
+
+        with mlflow.start_run():
+    mlflow.log_params({
+        "max_seq_length": 4096,
+        "grad_accum_steps": 4
+    })
+    mlflow.pytorch.log_model(
+        pipeline, 
+        "model",
+        registered_model_name="code_llama_qa"
+    )
+    
+  3.2 Ray Cluster Configuration
+
+
+IV. Cross-Team Integration
+  4.1 Data Pipeline Interface
+    Input Specification:
+        Example structure of the data:
+          ```python
+          {
+            "id": 0,
+            "category": "source code",
+            "context": "code name and its docstring",
+            "question": "What does this function do?",
+            "answer": "answer"
+          }
+          ```
+  4.2 Model Serving Interface
+    Output Schema:
+                  
+                  {
+              "answer": "Use Spring Batch's ItemProcessor", 
+              "confidence": 0.87,
+              "source": {
+                "commit": "a1b2c3d",
+                "issue_id": 456
+              }
+            }
+V. Advanced Features
+  5.1 Hybrid Parallel Training
+  
+      python"
+        strategy = FSDP(
+        auto_wrap_policy={TransformerEncoderLayer},
+        cpu_offload=CPUOffload(offload_params=True),
+        mixed_precision=torch.float16
+        )"
+    
+  5.2 Hyperparameter Tuning
+VI. Validation Metrics
+
+
+
+
+
 
 #### Model serving and monitoring platforms
 
@@ -290,82 +384,6 @@ The dashboard will serve as a central control panel for understanding and managi
 
 #### Continuous X
 
-**1. Continuous Integration (CI)**
-
-* **Trigger:** Code (backend API logic, frontend Flask app, data processing scripts, evaluation scripts, etc.) committed to the Git repository.
-* **Build & Test:**
-    * **Code Testing:** Automatically run unit tests and integration tests covering the Flask frontend, API interaction logic, data pipeline scripts (e.g., QA generation, validation logic).
-    * **Data Validation Testing:** Include steps in the pipeline to test data extraction, QA generation, and validation logic with a small sample dataset to ensure they work as expected.
-    * **Model Basic Testing:** (If CI includes model building steps) Verify the model can be successfully loaded, accepts input in the expected format, and produces output in the expected format.
-    * **Dependency Check:** Verify all dependencies are correctly installed and configured.
-* **Artifacts:**
-    * Tested code.
-    * Built Docker images (containing application code and dependencies, but not necessarily the large model itself; the model might be pulled during the deployment phase).
-    * Test reports.
-* **Platforms/Tools:** Git (e.g., GitHub/GitLab), CI/CD service (e.g., Jenkins, GitLab CI, GitHub Actions), Pytest, Docker.
-
-**2. Continuous Delivery/Deployment (CD)**
-
-* **Trigger:** CI successfully completes, or a new model passes evaluation in the CT process and is registered.
-* **Preparation Stage:**
-    * **Model Conversion & Optimization:** Automated scripts execute model format conversion (ONNX), graph optimization (ONNX Runtime), and quantization (INT8), verifying accuracy loss (<0.01).
-    * **Benchmarking:** Automatically run benchmarks to select the best execution provider (CUDA vs TensorRT).
-    * **Packaging:** Package the optimized model, Triton configurations, and API service code into the final deployment unit (e.g., updated Docker image).
-* **Deploy to Staging:**
-    * **Infrastructure Provisioning:** (If needed) Use IaC tools (Terraform, Pulumi) to configure compute resources (GPU nodes), networking, and persistent storage on Chameleon Cloud.
-    * **Service Deployment:** Deploy the packaged model and service to the Triton Inference Server in the Staging environment (across 2 GPUs, 2 instances per GPU, total concurrency 8).
-    * **Apply Configuration:** Apply Triton configurations like dynamic batching.
-* **Staging Validation:**
-    * **Automated Load Testing:** Run load tests using Locust to verify QPS (6-12), latency (500ms - 3s), error rate, and resource utilization meet requirements.
-* **Deploy to Production (Canary Release):**
-    * **Traffic Splitting:** Route a small portion of production traffic (e.g., internal test traffic simulating specific user personas) to the newly deployed model version.
-    * **Canary Online Evaluation:** Execute your designed Canary evaluation plan (questions from different user personas), monitoring model effectiveness (usefulness, accuracy) and performance metrics (QPS, latency, error rate).
-* **Full Rollout/Rollback:**
-    * If the Canary evaluation is successful, gradually shift all traffic to the new version.
-    * If the Canary evaluation fails, automatically or manually roll back to the previous stable version.
-* **Platforms/Tools:** CI/CD service, Docker, Kubernetes (or similar orchestrator), Triton Inference Server, ONNX Runtime, Locust, Chameleon Cloud API/CLI, Git (for version control and triggers).
-
-**3. Continuous Training (CT)**
-
-* **Trigger:**
-    * **Upstream Data Updates:** Automated monitoring system detects new Commits/Issues/PRs/Docs in the Transformers repository, triggering data extraction and QA generation. Training starts when a sufficient number of QA pairs accumulate in the staging buffer.
-    * **Downstream User Feedback:** Enough user feedback flagged as incorrect/low-quality (via frontend thumbs up/down or manual annotation) is collected, triggering feedback-based fine-tuning.
-    * **Model Performance Degradation:** CM system detects key metrics (e.g., user satisfaction, manual correction frequency, Canary comparison performance) falling below thresholds.
-    * **Scheduled Task:** Retraining occurs at fixed intervals (e.g., weekly, monthly).
-* **Data Pipeline (Automated):**
-    * **Extraction:** Automatically pull new content from Git/GitHub/website.
-    * **Generation:** Run rule-based/LLM (including self-instruct) methods to generate QA pairs.
-    * **Validation:** Use an LLM validation model or other methods to check answer correctness, especially for QA requiring reasoning/summarization.
-    * **Storage & Indexing:** Add validated QA pairs (with metadata) to the main dataset in persistent storage and update the index used by RAG.
-* **Model Training/Fine-tuning:**
-    * Fine-tune the Llama 3.3 70B model using the updated dataset (or, depending on the RAG architecture, primarily update the index and potentially fine-tune the retriever/generator).
-    * Use your defined training platform and process.
-* **Model Evaluation (Automated):**
-    * **Offline Evaluation:** After training completes, automatically run evaluations on the test set (including standard use cases, slice analysis, known failure modes, unit tests), calculating metrics like F1, EM, Precision, Recall.
-* **Model Registration:**
-    * If the new model's performance exceeds preset thresholds (compared to the previous version or a fixed standard), version it and register it in the model registry.
-* **Platforms/Tools:** Git/GitHub API, Data processing frameworks (Pandas, Spark), LLM for generation/validation, Vector database/Index library (FAISS, Elasticsearch), ML Training frameworks (PyTorch, Transformers Trainer), MLFlow/Weights & Biases (for experiment tracking and model registry), Persistent Storage (Chameleon), Workflow orchestration tools (Airflow, Kubeflow Pipelines).
-
-**4. Continuous Monitoring (CM)**
-
-* **Monitoring Targets:**
-    * **Model Service Performance:** QPS, latency, error rate, GPU/CPU/memory usage of Triton instances.
-    * **Model Quality (Online):**
-        * User Feedback: Real-time collection of thumbs up/down from the frontend.
-        * Human Annotation: Track frequency and patterns of manual review and correction.
-        * Canary Comparison: Performance comparison between new and old models on a live traffic subset.
-    * **Data/Business Impact:**
-        * (Via Dashboard) Track active users, task completion rate (proxy metrics), user satisfaction (surveys), changes in support ticket volume.
-        * (Via Dashboard) Monitor query patterns, popular questions, uncovered or poorly answered topic areas.
-* **Monitoring Methods:**
-    * **Infrastructure Monitoring:** Use Chameleon Cloud or standard cloud monitoring tools.
-    * **Application Performance Monitoring (APM):** Integrate APM tools or use logging and metrics endpoints from Triton/Flask.
-    * **Log Aggregation:** Centralize and analyze logs from Triton, Flask application, and data pipelines.
-    * **Interactive Dashboard:** Implement your designed dashboard to visualize dataset overview, quality metrics, training activity, and online inference monitoring.
-    * **Alerting System:** Configure alerting rules to automatically notify the team when key metrics (e.g., high latency, surge in error rate, drop in user satisfaction) cross thresholds.
-* **Feedback Loop:**
-    * Monitored performance degradation or quality issues can automatically trigger alerts, rollbacks (if in Canary phase), or initiate the CT pipeline.
-    * Data insights from the dashboard guide manual investigations, data annotation priorities, and future model improvement directions.
-* **Platforms/Tools:** Prometheus/Grafana, ELK Stack (Elasticsearch, Logstash, Kibana), APM tools (Datadog, Dynatrace), User feedback database, Interactive dashboard frameworks (Streamlit, Dash, Grafana), Alerting systems (Alertmanager, PagerDuty).
+<!-- Make sure to clarify how you will satisfy the Unit 3 requirements,  and which optional "difficulty" points you are attempting. -->
 
 
